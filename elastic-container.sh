@@ -46,19 +46,79 @@ check_required_apps() {
 # Create the script usage menu
 usage() {
   cat <<EOF | sed -e 's/^  //'
-  usage: ./elastic-container.sh [-v] (stage|start|stop|restart|status|help)
+  usage: ./elastic-container.sh [-v] [-u] (stage|start|stop|restart|status|update-version|help)
   actions:
-    stage     downloads all necessary images to local storage
-    start     creates a container network and starts containers
-    stop      stops running containers without removing them
-    destroy   stops and removes the containers, the network, and volumes created
-    restart   restarts all the stack containers
-    status    check the status of the stack containers
-    clear     clear all documents in logs and metrics indexes
-    help      print this message
+    stage           downloads all necessary images to local storage
+    start           creates a container network and starts containers
+    stop            stops running containers without removing them
+    destroy         stops and removes the containers, the network, and volumes created
+    restart         restarts all the stack containers
+    status          check the status of the stack containers
+    clear           clear all documents in logs and metrics indexes
+    update-version  set STACK_VERSION in .env to the newest stable x.y.z tag from Docker Hub (elastic/elasticsearch)
+    help            print this message
   flags:
-    -v        enable verbose output
+    -v              enable verbose output
+    -u              same as update-version (refreshes STACK_VERSION in .env), then exit
 EOF
+}
+
+# Set STACK_VERSION in .env to the highest stable semver tag listed for elastic/elasticsearch on Docker Hub.
+refresh_stack_version() {
+  check_required_apps
+
+  local hub_repo="https://hub.docker.com/v2/repositories/elastic/elasticsearch/tags"
+  local page=1
+  local curl_opts=(-fsSL)
+  if [ "${verbose:-0}" -eq 1 ]; then
+    curl_opts=(-fSL)
+  fi
+
+  local all_names=""
+  echo "Querying Docker Hub for elastic/elasticsearch tags..."
+  while [ "${page}" -le 40 ]; do
+    local json next
+    if ! json=$(curl "${curl_opts[@]}" "${hub_repo}?page_size=100&page=${page}"); then
+      echo "Failed to fetch Docker Hub tags (page ${page})." >&2
+      exit 1
+    fi
+    all_names+=$(jq -r '.results[].name' <<<"${json}")
+    all_names+=$'\n'
+    next=$(jq -r '.next // empty' <<<"${json}")
+    [ -z "${next}" ] && break
+    page=$((page + 1))
+  done
+
+  local latest
+  latest=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${all_names}" | sort -V | tail -1)
+  if [ -z "${latest}" ]; then
+    echo "Could not find a stable semver tag (x.y.z) on Docker Hub." >&2
+    exit 1
+  fi
+
+  local current
+  current=$(grep -E '^STACK_VERSION=' .env | head -1 | cut -d= -f2- | tr -d '\r')
+  if [ -z "${current}" ]; then
+    echo "No active STACK_VERSION= line found in .env." >&2
+    exit 1
+  fi
+
+  if [ "${current}" = "${latest}" ]; then
+    echo "STACK_VERSION is already ${latest} (newest stable tag found on Docker Hub)."
+    return 0
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      sed -i '' "s/^STACK_VERSION=.*/STACK_VERSION=${latest}/" .env
+      ;;
+    *)
+      sed -i "s/^STACK_VERSION=.*/STACK_VERSION=${latest}/" .env
+      ;;
+  esac
+
+  echo "Updated STACK_VERSION in .env: ${current} -> ${latest}"
+  echo "Images pull from docker.elastic.co; tags match Docker Hub elastic/elasticsearch releases."
 }
 
 # Create a function to enable the Detection Engine and load prebuilt rules in Kibana
@@ -192,11 +252,15 @@ clear_documents() {
 OPTIND=1 # Reset in case getopts has been used previously in the shell.
 
 verbose=0
+update_stack_version_flag=0
 
-while getopts "v" opt; do
+while getopts "vu" opt; do
   case "$opt" in
   v)
     verbose=1
+    ;;
+  u)
+    update_stack_version_flag=1
     ;;
   *) ;;
   esac
@@ -206,21 +270,31 @@ shift $((OPTIND - 1))
 
 [ "${1:-}" = "--" ] && shift
 
-ACTION="${*:-help}"
-
 if [ $verbose -eq 1 ]; then
   exec 3<>/dev/stderr
 else
   exec 3<>/dev/null
 fi
 
+if [ "${update_stack_version_flag}" -eq 1 ]; then
+  refresh_stack_version
+  exit 0
+fi
+
+ACTION="${*:-help}"
+
 if docker compose >/dev/null; then
   COMPOSE="docker compose"
 elif command -v docker-compose >/dev/null; then
   COMPOSE="docker-compose"
 else
-  echo "elastic-container requires docker compose!"
-  exit 2
+  case "${ACTION}" in
+  help | "update-version") ;;
+  *)
+    echo "elastic-container requires docker compose!"
+    exit 2
+    ;;
+  esac
 fi
 
 case "${ACTION}" in
@@ -290,6 +364,10 @@ case "${ACTION}" in
 
 "clear")
   clear_documents
+  ;;
+
+"update-version")
+  refresh_stack_version
   ;;
 
 "help")
