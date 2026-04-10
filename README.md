@@ -13,11 +13,12 @@ If you're interested in more details regarding this project and what to do once 
 1. `Git clone` this repo
 2. Install prerequisites (see below)
 3. Change into the `elastic-container/` folder
-4. Change the default password of `changeme` in the `.env` file (don't change the `elastic` username, it's a [required built-in user](https://www.elastic.co/guide/en/elasticsearch/reference/current/built-in-users.html))  
-5. Bulk enable pre-built detection rules by OS in the `.env` file (not required, see usage below)
-6. Make the `elastic-container.sh` shell script executable by running `chmod +x elastic-container.sh`
-7. Execute the `elastic-container.sh` shell script with the start argument `./elastic-container.sh start`
-8. Wait for the prompt to tell you to browse to https://localhost:5601 \
+4. **Set a current stack image tag** — pinned versions in `.env` can disappear from registries over time. Either run `bash ./elastic-container.sh update-version` (or `bash ./elastic-container.sh -u`) to set `STACK_VERSION` to the newest stable `x.y.z` tag listed for [elastic/elasticsearch on Docker Hub](https://hub.docker.com/r/elastic/elasticsearch/tags), or open that page and set `STACK_VERSION` in `.env` manually to a tag that exists for Elasticsearch, Kibana, and Elastic Agent. After `chmod +x`, you can use `./elastic-container.sh` instead of `bash ./elastic-container.sh`.
+5. Change the default password of `changeme` in the `.env` file (don't change the `elastic` username, it's a [required built-in user](https://www.elastic.co/guide/en/elasticsearch/reference/current/built-in-users.html))  
+6. Bulk enable pre-built detection rules by OS in the `.env` file (not required, see usage below)
+7. Make the `elastic-container.sh` shell script executable by running `chmod +x elastic-container.sh`
+8. Execute the `elastic-container.sh` shell script with the start argument `./elastic-container.sh start`
+9. Wait for the prompt to tell you to browse to https://localhost:5601 \
 (You may be presented a browser warning due to the self-signed certificates. You can type `thisisnotsafe` or click to proceed after which you will be directed to the Elastic log in screen)
 
 ## Requirements
@@ -92,6 +93,16 @@ WindowsDR=1
 
 MacOSDR=0
 ```
+
+### Updating `STACK_VERSION`
+
+If pulls fail because the tag in `.env` was removed or is outdated, refresh the pinned version before `stage` or `start`:
+
+```
+$ ./elastic-container.sh update-version
+```
+
+This queries the [elastic/elasticsearch](https://hub.docker.com/r/elastic/elasticsearch/tags) repository on Docker Hub, finds the highest stable tag matching `x.y.z` (SNAPSHOT and other non-semver tags are ignored), and rewrites the active `STACK_VERSION=` line in `.env`. The same behavior is available as a short flag: `./elastic-container.sh -u`. Docker does not need to be running for this action. For snapshot or pre-release builds, set `STACK_VERSION` in `.env` by hand to match a published tag.
 
 ### Starting
 
